@@ -103,6 +103,134 @@ class Doublet:
         """
         self.psi = -self.strength/(2*math.pi)*(Y-self.y)/((X-self.x)**2+(Y-self.y)**2)
 
+class Panel:
+    """Contains information related to a panel.
+    """
+    def __init__(self, xa, za, xb, zb):
+        """Creates a panel.
+
+        Arguments
+        -----------
+        xa, za -- Cartesian coordinates of the first end-point.
+        xb, zb -- Cartesian coordinates of the second end-point.
+        """
+        self.xa, self.za = xa, za
+        self.xb, self.zb = xb, zb
+        # control-point (center-point)
+        self.xc, self.zc = (xa+xb)/2, (za+zb)/2
+        # length of the panel
+        self.length = math.sqrt( (xb-xa)**2+(zb-za)**2 )
+
+        # orientation of the panel (angle between x-axis and panel's normal)
+        if xb-xa <= 0.:
+            self.beta = math.acos( (zb-za)/self.length )
+        elif xb-xa > 0.:
+            self.beta = math.pi + math.acos(-(zb-za)/self.length)
+
+        # location of the panel
+        if self.beta <= math.pi:
+            self.loc = 'upper'
+        else:
+            self.loc = 'lower'
+
+        self.sigma = 0. # source strength
+        self.vt = 0.    # tangential velocity
+        self.cp = 0.    # pressure coefficient
+
+def define_panels(x, z, N=40):
+    """Discretizes the geometry into panels using the 'cosine' method.
+
+    Arguments
+    ------------
+    x, z -- Cartesian coordinates of the geometry (1D arrays).
+    N -- number of panels (default 40).
+
+    Returns
+    -----------
+    panels -- Numpy array of panels.
+    """
+    R = (x.max()-x.min())/2.                # radius of the ci
+    R -= 1.0/10000.0*R                      # radius correction for float precision correction
+    x_center = (x.max()+x.min())/2.         # x-coord of the center
+    # x-coord of the circle points
+    x_circle = x_center + R*numpy.cos(numpy.linspace(0,2*math.pi,N+1)) 
+
+    x_ends = numpy.copy(x_circle)     # projection of the x-coord on the surface
+    z_ends = numpy.empty_like(x_ends) # initialization of the z-coord Numpy array 
+
+    # extend geometry array to end and begin with same x-coord (largest one)
+    if x[0] < x[-1]:
+        x, z = numpy.append(x[-1], x), numpy.append(z[-1], z) 
+    elif x[0] > x[-1]:
+        x, z = numpy.append(x, x[0]), numpy.append(z, z[0])
+    else:
+        pass # if both ends are equal, we do not need to close the contour
+
+    # computes the z-coordinate of end-points
+    I = 0
+    for i in range(N):
+        while I < len(x)-1:
+            if (x[I] <= x_ends[i] <= x[I+1]) or (x[I+1] <= x_ends[i] <= x[I]):
+                break
+            else:
+                I += 1
+        a = (z[I+1]-z[I])/(x[I+1]-x[I])
+        b = z[I+1] - a*x[I+1]
+        z_ends[i] = a*x_ends[i] + b
+    z_ends[N] = z_ends[0]
+
+    panels = numpy.empty(N, dtype=object)
+    for i in range(N):
+        panels[i] = Panel(x_ends[i], z_ends[i], x_ends[i+1], z_ends[i+1])
+
+    return panels
+
+def panel_contribution():
+    """Evaluates the contribution of a panel at given point.
+
+    Arguments
+    ------------
+    x, y -- Cartesian coordinates of the point.
+    panel -- panel which contribution is evaluated.
+    dxdz -- derivative of x in the z-direction.
+    dydz -- derivative of y in the z-direction.
+
+    Returns
+    -----------
+    Integral over the panel of the influence at one point.
+    """
+    pass
+
+
+
+
+
+# reads geometry from a data file
+with open ('./airfoils/mh45.dat') as file_name:
+    x, z = numpy.loadtxt(file_name, dtype=float, unpack=True)
+
+N = 40                            # number of panels
+panels = define_panels(x, z, N)   # discretizes of the geometry into panels
+
+# sets up framing parameters for plotting 
+val_x, val_z = 0.1, 0.2
+x_min, x_max = min(panel.xa for panel in panels), max(panel.xa for panel in panels)
+z_min, z_max = min(panel.za for panel in panels), max(panel.za for panel in panels)
+x_start, x_end = x_min-val_x*(x_max-x_min), x_max+val_x*(x_max-x_min)
+z_start, z_end = z_min-val_z*(z_max-z_min), z_max+val_z*(z_max-z_min)
+
+# plots the geometry and the panels
+size = 10
+pyplot.figure(figsize=(size, (z_end-z_start)/(x_end-x_start)*size))
+pyplot.grid(True)
+pyplot.xlabel('x', fontsize=16)
+pyplot.ylabel('z', fontsize=16)
+pyplot.xlim(x_start, x_end)
+pyplot.ylim(z_start, z_end)
+pyplot.plot(x, z, color='k', linestyle='-', linewidth=2)
+pyplot.plot(numpy.append([panel.xa for panel in panels], panels[0].xa), 
+         numpy.append([panel.za for panel in panels], panels[0].za), 
+         linestyle='-', linewidth=1, marker='o', markersize=6, color='#CD2305');
 
 
 N = 50                                   # Number of points in each direction

@@ -1,7 +1,6 @@
 import math 
 import numpy 
 from matplotlib import pyplot 
-from scipy import integrate
 
 class Freestream:
     """Contains information related to a freestream.
@@ -10,11 +9,9 @@ class Freestream:
         self.v_inf = v_inf
         self.alpha = alpha
 
-    def velocity(self, x, z):
-        N = len(x)
-        M = len(z)
-        self.u = self.v_inf*math.cos(self.alpha)*numpy.ones((M,N), dtype=float)
-        self.w = self.v_inf*math.sin(self.alpha)*numpy.ones((M,N), dtype=float)
+    def velocity(self, X, Z):
+        self.u = self.v_inf*math.cos(self.alpha)+X*0.0
+        self.w = self.v_inf*math.sin(self.alpha)+X*0.0
 
 class Source:
     """Contains information related to a source (or a sink).
@@ -131,7 +128,7 @@ class Panel:
         self.xa, self.za = xa, za
         self.xb, self.zb = xb, zb
         # control-point (center-point)
-        self.xc, self.zc = (xa+xb)/2, (za+zb)/2
+        self.xc, self.zc = (xa+xb)/2.0, (za+zb)/2.0
         # length of the panel
         self.length = math.sqrt( (xb-xa)**2+(zb-za)**2 )
 
@@ -149,14 +146,9 @@ class Panel:
         else:
             self.loc = 'lower'
 
-        self.ga = 0. # source strength density at end-point
-        self.gb = 0  # source strength density at end-point
-        self.gc = 0  # "equivalent" ponctual source strength
-
-        self.vel = 0 
 
 def define_panels(x, z, N=40):
-    """Discretizes the geometry into panels using the 'cosine' method.
+    """Discretizes airfoil geometry into panels using the 'cosine' method.
 
     Arguments
     ------------
@@ -208,114 +200,6 @@ def define_panels(x, z, N=40):
 
     return panels
 
-def lhs_setup_old(panels):
-    """Left hand side set-up of the linear system of equations.
-    """
-
-    # number of panels
-    nPanels = len(panels)
-    # left-hand size memory allocation
-    LHS = numpy.zeros((nPanels+1,nPanels+1), dtype=float)
-
-    # loops through all panels mid-points to secure flow tangency condition
-    for i in range(nPanels):
-        # loops through all panel end-points 
-        nx, nz = panels[i].nx, panels[i].nz
-        ri = numpy.array([panels[i].xc, panels[i].zc])
-        for j in range(nPanels):
-            # one-time operations common for all terms of the total integral
-            Lj = panels[j].length
-            rj =  numpy.array([panels[j].xa, panels[j].za])
-            rj1 = numpy.array([panels[j].xb, panels[j].zb])
-            Aji = ri - rj
-            Bj = rj - rj1
-            P = 2*numpy.dot(Aji,Bj)
-            A = numpy.dot(Aji,Aji)
-            B = numpy.dot(Bj,Bj)
-            delta = 4*A*B-P**2
-            delta_convergence = True 
-            if delta <= 0.0:
-                delta_convergence = False
-            # Fji integral term
-            rx, rz = panels[i].xc, panels[i].zc 
-            I = 0.0
-            if delta_convergence:
-                I += (2*B+P)/(math.sqrt(delta)*B)*math.atan((2*B+P)/math.sqrt(delta))
-                I += -(2*B+P)/(math.sqrt(delta)*B)*math.atan(P/math.sqrt(delta))
-                I += math.log(A)/(2*B)
-                I += -math.log(A+B+P)/(2*B)
-            else:
-                I += (math.log(math.fabs(P/(2*B+P))))/B 
-            LHS[i,j] += 1.0/(2*math.pi)*(nx*rz-nz*rx)*I
-            # Fjj integral term
-            rx, rz = panels[j].xa, panels[j].za
-            I = 0.0
-            if delta_convergence:
-                I -= (P**2+2*B*P+2*B**2-2*A*B)/(math.sqrt(delta)*B**2)*math.atan((2*B+P)/math.sqrt(delta))
-                I -= -(2*B+P)*math.log(A+B+P)/(2*B**2)
-                I -= (2*A*B-2*B**2-2*B*P-P**2)*math.atan(P/math.sqrt(delta))/(math.sqrt(delta)*B**2)
-                I -= (2*B+P)*math.log(A)/(2*B**2)
-                I -= 1.0/B
-            else:
-                I -= -(P+2*B)/(2*B**2)
-                I -= -2*(2*B+P)*math.log(2*B+P)/(2*B**2)
-                I -= 2.0/P + 3.0/B + P/(2*B**2) + (2*B+P)*math.log(math.fabs(P))/B**2
-            LHS[i,j] += 1.0/(2*math.pi)*(nx*rz-nz*rx)*I
-            # Fjj1 integral term
-            rx, rz = panels[j].xb, panels[j].zb
-            I = 0.0
-            if delta_convergence:
-                I -= (2*A*B-P*(B+P))*math.atan((2*B+P)/math.sqrt(delta))/(math.sqrt(delta)*B**2)
-                I -= -(B+P)*math.log(A+B+P)/(2*B**2)
-                I -= 1.0/B
-                I -= (P*(B+P)-2*A*B)*math.atan(P/math.sqrt(delta))/(math.sqrt(delta)*B**2)
-                I -= (B+P)*math.log(A)/(2*B**2)
-            else:
-                I -= -2.0/B + (B+P)*math.log(math.fabs((2*B+P)/P))/B**2 
-            LHS[i,j] += 1.0/(2*math.pi)*(nx*rz-nz*rx)*I
-            # Fj1i integral term
-            rx, rz = panels[i].xc, panels[i].zc
-            I = 0.0
-            if delta_convergence:
-                I += math.log(A+B+P)/(2*B)
-                I += -P*math.atan((2*B+P)/math.sqrt(delta))/(B*math.sqrt(delta))
-                I += -math.log(A)/(2*B)
-                I += P*math.atan(P/math.sqrt(delta))/(B*math.sqrt(delta))
-            else:
-                I += 1.0/B*math.log(math.fabs((2*B+P)/P)) - 1.0/B + P/(B*(2*B+P))
-            LHS[i,j+1] += 1.0/(2*math.pi)*(nx*rz-nz*rx)*I
-            # Fj1j integral term
-            I = 0.0
-            if delta_convergence:
-                I -= (2*A*B-P*(B+P))*math.atan((2*B+P)/math.sqrt(delta))/(B**2*math.sqrt(delta))
-                I -= -(B+P)*math.log(A+B+P)/(2*B**2)
-                I -= 1.0/B
-                I -= (P*(B+P)-2*A*B)*math.atan(P/math.sqrt(delta))/(B**2*math.sqrt(delta))
-                I -= (B+P)*math.log(A)/(2*B**2)
-            else:
-                I -= -2.0/B + (B+P)*math.log(math.fabs((2*B+P)/P))/B**2
-            rx, rz = panels[j].xa, panels[j].za
-            LHS[i,j+1] += 1.0/(2*math.pi)*(nx*rz-nz*rx)*I
-            # Fj1j1 integral term
-            rx, rz = panels[j].xb, panels[j].zb
-            I = 0.0
-            if delta_convergence:
-                I -= (P**2-2*A*B)*math.atan((2*B+P)/math.sqrt(delta))/(B**2*math.sqrt(delta))
-                I -= -P*math.log(A+B+P)/(2*B**2)
-                I -= 1.0/B
-                I -= -(P**2-2*A*B)*math.atan(P/math.sqrt(delta))/(B**2*math.sqrt(delta))
-                I -= P*math.log(A)/(2*B**2)
-            else:
-                I -= -P**2/(2*B**2*(2*B+P))-2*P*math.log(2*B+P)/B**2
-                I -= 1.0/B + P/(2*B**2) + 2*P*math.log(math.fabs(P))/(2*B**2)
-            LHS[i,j+1] += 1.0/(2*math.pi)*(nx*rz-nz*rx)*I
-
-    # kutta condition (net vortex density equal to zero at both end-points in trailing edge)
-    LHS[nPanels,0], LHS[nPanels,nPanels] = 1.0, 1.0
-    #LHS[nPanels,1:30] = numpy.ones((1,29))
-    #LHS[nPanels,-31:-2] = numpy.ones((1,29))
-
-    return LHS
 
 def lhs_setup(panels):
     """Left-hand side set-up of the linear system of equations.
@@ -505,12 +389,6 @@ def panel_contribution(panel, ri, gj, gj1, DELTA_THRSH=0.0):
 
 def panels_contribution(panels, vortices, X, Y):
     """Evaluates the contribution of all panels at mesh grid.
-
-    Arguments
-    ------------
-    panels_contribution(panels, vortices, numpy.array([[-1000000000]]), numpy.array([[1000000]]))
-    Returns
-    -----------
     """
 
     # number of panels
@@ -535,158 +413,44 @@ def panels_contribution(panels, vortices, X, Y):
 
     return [u_flow,w_flow]
 
+def airfoil_flow_plot(panels, vortices, freestream, val_x=1, val_z=2, size=10):
 
+    # sets up framing parameters for plotting 
+    val_x, val_z = 1, 2
+    x_min, x_max = min(panel.xa for panel in panels), max(panel.xa for panel in panels)
+    z_min, z_max = min(panel.za for panel in panels), max(panel.za for panel in panels)
+    x_start, x_end = x_min-val_x*(x_max-x_min), x_max+val_x*(x_max-x_min)
+    z_start, z_end = z_min-val_z*(z_max-z_min), z_max+val_z*(z_max-z_min)
 
-# reads geometry from a data file
-with open ('./airfoils/mh45.dat') as file_name:
-    x, z = numpy.loadtxt(file_name, dtype=float, unpack=True)
-
-N = 200                           # number of panels
-AOA = 10.0*math.pi/180.0
-v_wind = 1
-
-# discretizes of the geometry into panels
-panels = define_panels(x, z, N)   
-
-# linear varying vortex panels linear system setup
-freestream = Freestream(v_wind, AOA) 
-b = rhs_setup(panels, freestream)
-A = lhs_setup(panels)
-vortices = numpy.linalg.solve(A,b) 
-#vortices = numpy.linalg.lstsq(A[10:20:1,:],b[10:20:1])[0]
-
-# sets up framing parameters for plotting 
-#val_x, val_z = 0.1, 0.2
-val_x, val_z = 1, 2
-x_min, x_max = min(panel.xa for panel in panels), max(panel.xa for panel in panels)
-z_min, z_max = min(panel.za for panel in panels), max(panel.za for panel in panels)
-x_start, x_end = x_min-val_x*(x_max-x_min), x_max+val_x*(x_max-x_min)
-z_start, z_end = z_min-val_z*(z_max-z_min), z_max+val_z*(z_max-z_min)
-
-# plots the geometry and the panels
-size = 10
-pyplot.figure(figsize=(size, (z_end-z_start)/(x_end-x_start)*size))
-pyplot.grid(True)
-pyplot.xlabel('x', fontsize=16)
-pyplot.ylabel('z', fontsize=16)
-pyplot.xlim(x_start, x_end)
-pyplot.ylim(z_start, z_end)
-pyplot.plot(x, z, color='k', linestyle='-', linewidth=2)
-pyplot.plot(numpy.append([panel.xa for panel in panels], panels[0].xa), 
-         numpy.append([panel.za for panel in panels], panels[0].za), 
+    # plots the geometry and the panels
+    size = 10
+    pyplot.figure(figsize=(size, (z_end-z_start)/(x_end-x_start)*size))
+    pyplot.grid(True)
+    pyplot.xlabel('x', fontsize=16)
+    pyplot.ylabel('z', fontsize=16)
+    pyplot.xlim(x_start, x_end)
+    pyplot.ylim(z_start, z_end)
+    pyplot.plot(numpy.append([panel.xa for panel in panels], panels[0].xa),
+         numpy.append([panel.za for panel in panels], panels[0].za),
          linestyle='-', linewidth=1, marker='o', markersize=6, color='#CD2305');
 
-# create "equivalent" ponctual vortices for debugging
-x = numpy.linspace(x_start, x_end, 15)
-y = numpy.linspace(z_start, z_end, 15)
-X, Y = numpy.meshgrid(x, y)
-[u_flow, w_flow] = panels_contribution(panels, vortices, X, Y)
-freestream.velocity(x,y)
-u_flow = u_flow.copy() + freestream.u.copy()
-w_flow = w_flow.copy() + freestream.w.copy()
+    x = numpy.linspace(x_start, x_end, 15)
+    y = numpy.linspace(z_start, z_end, 15)
+    X, Y = numpy.meshgrid(x, y)
+    [u_flow, w_flow] = panels_contribution(panels, vortices, X, Y)
+    freestream.velocity(X,Y)
+    u_flow = u_flow.copy() + freestream.u.copy()
+    w_flow = w_flow.copy() + freestream.w.copy()
 
-pyplot.streamplot(X, Y, u_flow, w_flow, density=2, linewidth=1, arrowsize=1, arrowstyle='->')
-pyplot.fill([panel.xc for panel in panels], 
-    [panel.zc for panel in panels], 
-    color='k', linestyle='solid', linewidth=2, zorder=2)
+    # fill airfoil plot (cosmetics)
+    pyplot.fill([panel.xc for panel in panels],
+        [panel.zc for panel in panels],
+        color='k', linestyle='solid', linewidth=2, zorder=2)
 
-#N = 50                                   # Number of points in each direction
-#x_start, x_end = -2.0, 2.0               # x-direction boundaries
-#y_start, y_end = -1.0, 1.0               # y-direction boundaries
-#x = numpy.linspace(x_start, x_end, N)    # computes a 1D-array for x
-#y = numpy.linspace(y_start, y_end, N)    # computes a 1D-array for y
-#X, Y = numpy.meshgrid(x, y)              # generates a mesh grid
+    # plot flow streamlines
+    pyplot.streamplot(X, Y, u_flow, w_flow, density=2, linewidth=1, arrowsize=1, arrowstyle='->')
 
-#strength_doublet = 1.0                   # strength of the doublet
-#x_doublet, y_doublet = 0.0, 0.3          # location of the doublet
-
-# creates a doublet (object of class Doublet)
-#doublet = Doublet(strength_doublet, x_doublet, y_doublet)
-
-# computes the velocity and stream-function of the doublet on the mesh
-#doublet.velocity(X, Y)
-#doublet.stream_function(X, Y)
-
-# creates the image of the doublet
-#doublet_image = Doublet(strength_doublet, x_doublet, -y_doublet)
-
-# computes the velocity and stream-function of the image on the mesh
-#doublet_image.velocity(X, Y)
-#doublet_image.stream_function(X, Y)
-
-# superposition of the doublet and its image to the uniform flow
-#u = doublet.u + doublet_image.u
-#v = doublet.v + doublet_image.v
-#psi = doublet.psi + doublet_image.psi
-
-# plots the streamlines
-#size = 10
-#pyplot.figure(figsize=(size, (y_end-y_start)/(x_end-x_start)*size))
-#pyplot.xlabel('x', fontsize=16)
-#pyplot.ylabel('y', fontsize=16)
-#pyplot.xlim(x_start, x_end)
-#pyplot.ylim(y_start, y_end)
-#pyplot.streamplot(X, Y, u, v, density=2, linewidth=1, arrowsize=1, arrowstyle='->')
-#pyplot.scatter(doublet.x, doublet.y, color='r', s=80, marker='o')
-#pyplot.scatter(doublet_image.x, doublet_image.y, color='r', s=80, marker='D')
-#pyplot.axhline(0., color='k', linestyle='--', linewidth=4);
-
-#plot one panel!!!!
-N = 100                               # Number of points in each direction
-x_start, x_end = -1.0, 1.0            # x-direction boundaries
-y_start, y_end = -1.5, 1.5            # y-direction boundaries
-x = numpy.linspace(x_start, x_end, N)    # computes a 1D-array for x
-y = numpy.linspace(y_start, y_end, N)    # computes a 1D-array for y
-X, Y = numpy.meshgrid(x, y)              # generates a mesh grid
-
-sigma = 2.5    # strength of the source-sheet
-# boundaries of the source-sheet
-y_min, y_max = -1.0, 1.0
-
-u = numpy.zeros(X.shape)
-v = numpy.zeros(X.shape)
-
-panel = Panel(0, y_min, 0, y_max) 
-
-for i in range(X.shape[0]):
-    for j in range(X.shape[1]):
-        ri = numpy.array([X[i,j],Y[i,j]])
-        vel = panel_contribution(panel, ri, sigma, sigma, DELTA_THRSH=0.0)
-        u[i,j] = vel[0]
-        v[i,j] = vel[1]
-
-size = 8
-pyplot.figure(figsize=(size, (y_end-y_start)/(x_end-x_start)*size))
-pyplot.grid(True)
-pyplot.xlabel('x', fontsize=16)
-pyplot.ylabel('y', fontsize=16)
-pyplot.xlim(x_start, x_end)
-pyplot.ylim(y_start, y_end)
-pyplot.streamplot(X, Y, u, v, density=2, linewidth=1, arrowsize=1, arrowstyle='->')
-pyplot.axvline(0.0, (y_min-y_start)/(y_end-y_start), (y_max-y_start)/(y_end-y_start), 
-            color='#CD2305', linewidth=4)
-velocity = pyplot.contourf(X, Y, numpy.sqrt(u**2+v**2), levels=numpy.linspace(0.0, 0.1, 10))
-cbar = pyplot.colorbar(velocity, ticks=[0, 0.05, 0.1], orientation='horizontal')
-cbar.set_label('Velocity magnitude', fontsize=16);
-# end of one plot panel!!!
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-pyplot.show()
-
-
+    # show figures
+    pyplot.show()
 
 
